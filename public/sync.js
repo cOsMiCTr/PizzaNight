@@ -50,8 +50,39 @@
     });
   }
 
+  // ---------- 1b. Direct DOM change listener (works even if Safari blocks
+  //               the localStorage.setItem override on phones) ----------
+  const cardSyncTimers = {};
+  function syncCardToServer(card) {
+    if (!card) return;
+    const guestNum = Number(card.dataset.guest);
+    if (!guestNum) return;
+    const name = card.querySelector(".name")?.textContent?.trim() || "";
+    const data = {};
+    card.querySelectorAll('.topping input[type="checkbox"]').forEach((cb) => {
+      const key = cb.dataset.key;
+      if (key && cb.checked) data[key] = true;
+    });
+    const notes = card.querySelector("textarea[data-key='notes']")?.value?.trim() || "";
+    if (notes) data.notes = notes;
+    fetch(SYNC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ guest_num: guestNum, guest_name: name, data }),
+    }).catch(() => {});
+  }
+  function debouncedSync(card) {
+    const num = card?.dataset?.guest;
+    if (!num) return;
+    clearTimeout(cardSyncTimers[num]);
+    cardSyncTimers[num] = setTimeout(() => syncCardToServer(card), 600);
+  }
+
   // ---------- 2. Inject "Bestellen!" button + AI popup ----------
   const css = `
+    /* Hide the "Gespeichert" toast that fires on every change */
+    .toast{ display:none !important; }
+
     .order-btn{
       appearance:none;border:0;cursor:pointer;
       font-family:"DM Sans",system-ui,sans-serif;
@@ -292,12 +323,23 @@
     injectCss();
     buildModal();
     injectButtons();
-    // Re-inject button after per-card reset (which replaces the card node)
     const root = document.getElementById("guests");
     if (root) {
+      // Re-inject Bestellen button after per-card reset (which replaces the card)
       new MutationObserver(() => injectButtons()).observe(root, {
         childList: true,
         subtree: false,
+      });
+      // Direct change/input listener — fires on every check/uncheck/note edit.
+      // Independent of the localStorage interceptor, so it works even when
+      // Safari restricts the override on phones.
+      root.addEventListener("change", (e) => {
+        const card = e.target.closest(".guest-card");
+        if (card) debouncedSync(card);
+      });
+      root.addEventListener("input", (e) => {
+        const card = e.target.closest(".guest-card");
+        if (card) debouncedSync(card);
       });
     }
   });
