@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Pizza Night – Admin</title>
+<style>
+  :root{
+    --cream:#f7efe1; --paper:#fbf6ea; --ink:#2a1d12; --ink-soft:#5a4632;
+    --tomato:#c8321f; --tomato-deep:#9a2614; --basil-deep:#355724;
+    --line:#2a1d1226;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; padding:24px;
+    font-family:system-ui,-apple-system,sans-serif;
+    background:var(--cream); color:var(--ink);
+    min-height:100vh;
+  }
+  h1{ font-family:Georgia,serif; font-style:italic; margin:0 0 4px; color:var(--tomato-deep); }
+  .meta{ color:var(--ink-soft); font-size:13px; margin-bottom:18px; }
+  .auth{ max-width:400px; margin:80px auto; background:var(--paper); padding:24px; border-radius:16px; border:1.5px solid var(--line);}
+  .auth label{ display:block; font-size:12px; text-transform:uppercase; font-weight:700; color:var(--ink-soft); margin-bottom:6px; }
+  .auth input{ width:100%; padding:12px; font-size:16px; border:1.5px solid var(--line); border-radius:10px; background:#fff; }
+  .auth button{ margin-top:14px; width:100%; padding:12px; background:var(--tomato); color:#fff; border:0; border-radius:10px; font-weight:700; cursor:pointer; }
+  .err{ color:var(--tomato-deep); font-size:13px; margin-top:10px; }
+  .grid{ display:grid; gap:14px; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); }
+  .card{
+    background:var(--paper);
+    border:1.5px solid var(--line);
+    border-radius:16px;
+    padding:14px 16px;
+    box-shadow:0 1px 0 #fff inset;
+  }
+  .card.empty{ opacity:.5; }
+  .card h2{ font-size:17px; margin:0 0 4px; color:var(--ink); }
+  .card .updated{ font-size:11px; color:var(--ink-soft); margin-bottom:10px; }
+  .toppings{ display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
+  .chip{
+    background:#fff; border:1.4px solid var(--line);
+    padding:3px 9px; border-radius:999px; font-size:12px; font-weight:600;
+  }
+  .chip.tomato{ background:#fceee9; border-color:#c8321f44; color:var(--tomato-deep); }
+  .notes{
+    background:#fff; padding:8px 10px; border-radius:8px;
+    font-style:italic; font-size:13px; color:var(--ink-soft);
+    border-left:3px solid var(--basil-deep);
+    margin-top:6px;
+  }
+  .empty-msg{ font-style:italic; color:var(--ink-soft); font-size:13px; }
+  .header-row{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:18px; flex-wrap:wrap;}
+  .stats{ font-size:13px; color:var(--ink-soft); }
+  .stats b{ color:var(--ink); }
+  .refresh{ font-size:12px; color:var(--ink-soft); margin-top:14px; }
+</style>
+</head>
+<body>
+
+<div id="authView" class="auth" style="display:none">
+  <h1 style="font-size:22px; margin-bottom:14px;">Pizza Admin</h1>
+  <label for="key">Admin-Schlüssel</label>
+  <input id="key" type="password" autocomplete="current-password" />
+  <button id="loginBtn" type="button">Anmelden</button>
+  <div id="authErr" class="err"></div>
+</div>
+
+<div id="appView" style="display:none">
+  <div class="header-row">
+    <div>
+      <h1>🍕 Pizza Night – Admin</h1>
+      <div class="meta">Bestellungen aller Gäste · aktualisiert sich alle 5&nbsp;Sek.</div>
+    </div>
+    <div class="stats" id="stats"></div>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="refresh" id="lastRefresh"></div>
+</div>
+
+<script>
+(function(){
+  const GUESTS = [
+    { num:1, name:"Christoph Biallas" },
+    { num:2, name:"Emel Biallas" },
+    { num:3, name:"Noyan Biallas" },
+    { num:4, name:"Levin Biallas" },
+    { num:5, name:"Onur Baki" },
+    { num:6, name:"Tugba Baki" },
+    { num:7, name:"Batu Baki" },
+    { num:8, name:"Kaan Baki" },
+  ];
+  const TOPPING_LABELS = {
+    sauce:"Tomatensauce", cheese:"Käse", mozz:"Mozzarella",
+    corn:"Mais", mushroom:"Pilze", onion:"Rote Zwiebeln",
+    zucchini:"Zucchini", tomslice:"Tomatenscheiben",
+    rucola:"Rucola", parm:"Parmesan", oil:"Olivenöl", sesame:"Sesam",
+    oregano:"Oregano", thyme:"Thymian", basil:"Basilikum",
+  };
+
+  let key = sessionStorage.getItem("adminKey")
+    || (new URLSearchParams(location.search)).get("key")
+    || "";
+  const authView = document.getElementById("authView");
+  const appView = document.getElementById("appView");
+
+  function showAuth(errMsg){
+    authView.style.display = "block";
+    appView.style.display = "none";
+    if (errMsg) document.getElementById("authErr").textContent = errMsg;
+  }
+  function showApp(){
+    authView.style.display = "none";
+    appView.style.display = "block";
+  }
+
+  document.getElementById("loginBtn").addEventListener("click", () => {
+    key = document.getElementById("key").value.trim();
+    sessionStorage.setItem("adminKey", key);
+    fetchAndRender();
+  });
+  document.getElementById("key").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.getElementById("loginBtn").click();
+  });
+
+  function fmtTime(iso){
+    if (!iso) return "";
+    const d = new Date(iso);
+    return d.toLocaleString("de-DE", { hour:"2-digit", minute:"2-digit", day:"2-digit", month:"2-digit" });
+  }
+
+  function renderCard(guest, row){
+    const card = document.createElement("div");
+    card.className = "card" + (row ? "" : " empty");
+
+    const h = document.createElement("h2");
+    h.textContent = `#${guest.num} ${row?.guest_name || guest.name}`;
+    card.appendChild(h);
+
+    const updated = document.createElement("div");
+    updated.className = "updated";
+    updated.textContent = row ? `Aktualisiert: ${fmtTime(row.updated_at)}` : "Keine Bestellung";
+    card.appendChild(updated);
+
+    if (!row || !row.data) return card;
+
+    const data = row.data;
+    const toppings = Object.entries(data)
+      .filter(([k,v]) => k !== "notes" && v === true)
+      .map(([k]) => TOPPING_LABELS[k] || k);
+
+    if (toppings.length === 0 && !data.notes) {
+      const e = document.createElement("div");
+      e.className = "empty-msg";
+      e.textContent = "Karte geöffnet, aber nichts ausgewählt";
+      card.appendChild(e);
+      return card;
+    }
+
+    if (toppings.length > 0) {
+      const wrap = document.createElement("div");
+      wrap.className = "toppings";
+      toppings.forEach(t => {
+        const chip = document.createElement("span");
+        chip.className = "chip tomato";
+        chip.textContent = t;
+        wrap.appendChild(chip);
+      });
+      card.appendChild(wrap);
+    }
+
+    if (data.notes && String(data.notes).trim()) {
+      const n = document.createElement("div");
+      n.className = "notes";
+      n.textContent = "„" + data.notes.trim() + "“";
+      card.appendChild(n);
+    }
+    return card;
+  }
+
+  function renderStats(filled, total, totalToppings){
+    const stats = document.getElementById("stats");
+    stats.textContent = "";
+    const b1 = document.createElement("b");
+    b1.textContent = filled + "/" + total;
+    const sep1 = document.createTextNode(" Gäste · ");
+    const b2 = document.createElement("b");
+    b2.textContent = String(totalToppings);
+    const sep2 = document.createTextNode(" Beläge gewählt");
+    stats.appendChild(b1);
+    stats.appendChild(sep1);
+    stats.appendChild(b2);
+    stats.appendChild(sep2);
+  }
+
+  async function fetchAndRender(){
+    if (!key) { showAuth(); return; }
+    try {
+      const res = await fetch("/api/orders?key=" + encodeURIComponent(key), { cache:"no-store" });
+      if (res.status === 401) {
+        sessionStorage.removeItem("adminKey");
+        showAuth("Falscher Schlüssel.");
+        return;
+      }
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const rows = await res.json();
+      showApp();
+      const byNum = {};
+      rows.forEach(r => byNum[r.guest_num] = r);
+
+      const grid = document.getElementById("grid");
+      grid.textContent = "";
+      let filled = 0, totalToppings = 0;
+      GUESTS.forEach(g => {
+        const row = byNum[g.num];
+        grid.appendChild(renderCard(g, row));
+        if (row?.data) {
+          const t = Object.entries(row.data)
+            .filter(([k,v]) => k !== "notes" && v === true).length;
+          if (t > 0 || (row.data.notes && String(row.data.notes).trim())) filled++;
+          totalToppings += t;
+        }
+      });
+      renderStats(filled, GUESTS.length, totalToppings);
+      document.getElementById("lastRefresh").textContent =
+        "Letzter Abruf: " + new Date().toLocaleTimeString("de-DE");
+    } catch (e) {
+      console.error(e);
+      showAuth("Fehler beim Laden. Schlüssel prüfen.");
+    }
+  }
+
+  fetchAndRender();
+  setInterval(fetchAndRender, 5000);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "pizza-night",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pizza Night – belag-auswahl mit admin-übersicht und KI-kommentaren",
+  "type": "module",
+  "engines": {
+    "node": "20.x"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@neondatabase/serverless": "^0.10.4"
+  }
+}
