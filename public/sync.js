@@ -209,6 +209,18 @@
     return { guest_num: Number(guestNum), guest_name: name, toppings, notes };
   }
 
+  // DB-shaped data: { sauce: true, mozz: true, notes: "..." }
+  function gatherDbData(card) {
+    const data = {};
+    card.querySelectorAll('.topping input[type="checkbox"]').forEach((cb) => {
+      const key = cb.dataset.key;
+      if (key && cb.checked) data[key] = true;
+    });
+    const notes = card.querySelector("textarea[data-key='notes']")?.value?.trim() || "";
+    if (notes) data.notes = notes;
+    return data;
+  }
+
   async function handleOrder(card, btn) {
     const sel = gatherSelection(card);
     if (sel.toppings.length === 0 && !sel.notes) {
@@ -217,19 +229,42 @@
     }
     btn.disabled = true;
     showLoading();
-    try {
-      const res = await fetch(COMMENT_URL, {
+
+    const dbPayload = {
+      guest_num: sel.guest_num,
+      guest_name: sel.guest_name,
+      data: gatherDbData(card),
+    };
+
+    // Fire both requests in parallel — DB save (critical) + AI comment (nice-to-have)
+    const [orderRes, commentRes] = await Promise.allSettled([
+      fetch(SYNC_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(dbPayload),
+      }),
+      fetch(COMMENT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sel),
-      });
-      const json = await res.json();
-      showText(json.comment || "Bellissima Pizza! 🍕");
-    } catch (e) {
-      showText("Mamma mia, die Leitung in die Küche ist tot! Aber deine Bestellung ist gespeichert. 🍕");
-    } finally {
-      btn.disabled = false;
+      }),
+    ]);
+
+    let saved = orderRes.status === "fulfilled" && orderRes.value.ok;
+    let comment = "Bellissima Pizza! 🍕";
+    if (commentRes.status === "fulfilled" && commentRes.value.ok) {
+      try {
+        const json = await commentRes.value.json();
+        if (json.comment) comment = json.comment;
+      } catch (e) {}
     }
+
+    if (!saved) {
+      showText("Mamma mia! Konnte die Bestellung nicht speichern — bitte nochmal versuchen.");
+    } else {
+      showText(comment);
+    }
+    btn.disabled = false;
   }
 
   function injectButtons() {
